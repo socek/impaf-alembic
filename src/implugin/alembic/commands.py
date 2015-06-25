@@ -52,14 +52,16 @@ class AlembicCommand(SqlAlchemyApplication):
         config['formatter_hatak'] = {
             'format': '[Alembic] %(message)s',
         }
-        config['formatter_generic'] = {}
-        config['formatter_generic']['datefmt'] = '%%H:%%M:%%S'
-        config['formatter_generic']['format'] = (
-            '%%(levelname)-5.5s [%%(name)s] %%(message)s'
-        )
 
         with open(self.paths['alembic:ini'], 'w') as configfile:
             config.write(configfile)
+            configfile.write(
+                '\n'.join([
+                    '[formatter_generic]',
+                    'datefmt = %H:%M:%S',
+                    'format = %(levelname)-5.5s [%(name)s] %(message)s',
+                ])
+            )
 
     def set_sys_argv(self):
         sys.argv.insert(1, '-c')
