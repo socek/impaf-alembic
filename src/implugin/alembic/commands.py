@@ -1,14 +1,19 @@
 import re
 import sys
+import logging
 from configparser import ConfigParser
+from importlib import import_module
 
 from alembic.command import stamp
 from alembic.config import CommandLine
 from alembic.config import Config
-import venusian
+from venusian import Scanner
 
 from implugin.sqlalchemy.application import SqlAlchemyApplication
 from implugin.sqlalchemy.requestable import DatabaseConnection
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=20)
 
 
 class AlembicCommand(SqlAlchemyApplication):
@@ -26,7 +31,7 @@ class AlembicCommand(SqlAlchemyApplication):
             'keys': 'console',
         }
         config['formatters'] = {
-            'keys': 'generic, hatak',
+            'keys': 'generic, impaf',
         }
         config['logger_root'] = {
             'level': 'WARN',
@@ -47,9 +52,9 @@ class AlembicCommand(SqlAlchemyApplication):
             'class': 'StreamHandler',
             'args': '(sys.stderr,)',
             'level': 'NOTSET',
-            'formatter': 'hatak',
+            'formatter': 'impaf',
         }
-        config['formatter_hatak'] = {
+        config['formatter_impaf'] = {
             'format': '[Alembic] %(message)s',
         }
 
@@ -79,7 +84,7 @@ class AlembicCommand(SqlAlchemyApplication):
         self.run_alembic()
 
 
-class InitDatabase(AlembicCommand, DatabaseConnection):
+class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
 
     def get_datagenerator(self):
         pass
@@ -87,35 +92,52 @@ class InitDatabase(AlembicCommand, DatabaseConnection):
     def get_metadata(self):
         pass
 
-    def run_alembic(self):
+    def run_command(self, settings={}):
+        super().run_command(settings)
+        self._init()
+        self._delete_database()
+        self._scan_for_models()
+        self._create_schema()
+        self._generate_fixtures()
+        self._stamp()
+
+    def _init(self):
         self._cache = {}
-        engine = self.registry['db_engine']
-        metadata = self.get_metadata()
-        metadata.bind = engine
+        self.engine = self.registry['db_engine']
+        self.metadata = self.get_metadata()
+        self.metadata.bind = self.engine
+        self.log = log
 
+    def _delete_database(self):
         if '--iwanttodeletedb' in sys.argv:
-            print('[Impaf] Removing old database...')
-            for table in reversed(metadata.sorted_tables):
-                engine.execute(table.delete())
+            self.log.info('Removing old database...')
+            for table in reversed(self.metadata.sorted_tables):
+                self.engine.execute(table.delete())
 
-        print('[Impaf] Scanning for models...')
-        scan = venusian.Scanner()
+    def _scan_for_models(self):
+        self.log.info('Scanning for models...')
+        scan = Scanner()
         scan.scan(
-            __import__(self.module),
+            import_module(self.module),
             ignore=[re.compile('tests$').search]
         )
-        print('[Impaf] Initializing database...')
-        metadata.create_all()
 
+    def _create_schema(self):
+        self.log.info('Initializing database...')
+        self.metadata.create_all()
+
+    def _generate_fixtures(self):
         generator = self.get_datagenerator()
         if generator:
-            print('[Impaf] Creating fixtures...')
+            self.log.info('Creating fixtures...')
             generator.feed_database(self.database)
             generator.create_all()
 
+    def _stamp(self):
         alembic_cfg = Config(self.paths['alembic:ini'])
         stamp(alembic_cfg, 'head')
 
     @property
     def registry(self):
         return self.config.registry
+
