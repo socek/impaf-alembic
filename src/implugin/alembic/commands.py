@@ -86,9 +86,6 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
     def get_datagenerator(self):
         pass
 
-    def get_metadata(self):
-        pass
-
     def get_driver(self):
         pass
 
