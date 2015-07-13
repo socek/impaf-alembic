@@ -1,13 +1,10 @@
-import re
 import sys
 import logging
 from configparser import ConfigParser
-from importlib import import_module
 
 from alembic.command import stamp
 from alembic.config import CommandLine
 from alembic.config import Config
-from venusian import Scanner
 
 from implugin.sqlalchemy.application import SqlAlchemyApplication
 from implugin.sqlalchemy.requestable import DatabaseConnection
@@ -92,11 +89,14 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
     def get_metadata(self):
         pass
 
+    def get_driver(self):
+        pass
+
     def run_command(self, settings={}):
         super().run_command(settings)
         self._init()
         self._delete_database()
-        self._scan_for_models()
+        self._collect_metadatas()
         self._create_schema()
         self._generate_fixtures()
         self._stamp()
@@ -104,8 +104,7 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
     def _init(self):
         self._cache = {}
         self.engine = self.registry['db_engine']
-        self.metadata = self.get_metadata()
-        self.metadata.bind = self.engine
+        self.metadatas = set()
         self.log = log
 
     def _delete_database(self):
@@ -114,17 +113,24 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
             for table in reversed(self.metadata.sorted_tables):
                 self.engine.execute(table.delete())
 
-    def _scan_for_models(self):
+    def _collect_metadatas(self):
         self.log.info('Scanning for models...')
-        scan = Scanner()
-        scan.scan(
-            import_module(self.module),
-            ignore=[re.compile('tests$').search]
-        )
+        holder = self.generate_driver_holder()
+        for driver in holder._drivers:
+            driver._append_metadata(self.metadatas)
+
+    def generate_driver_holder(self):
+        holder_cls = self.get_driver()
+        db = lambda: self.registry['db']
+        holder = holder_cls(db)
+        holder.generate_drivers()
+        return holder
 
     def _create_schema(self):
         self.log.info('Initializing database...')
-        self.metadata.create_all()
+        for metadata in self.metadatas:
+            metadata.bind = self.engine
+            metadata.create_all()
 
     def _generate_fixtures(self):
         generator = self.get_datagenerator()

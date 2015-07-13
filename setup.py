@@ -4,7 +4,6 @@ from setuptools import setup, find_packages
 install_requires = [
     'impaf',
     'alembic',
-    'venusian',
 ]
 
 if __name__ == '__main__':
