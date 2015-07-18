@@ -1,8 +1,9 @@
 import os
 from tempfile import NamedTemporaryFile
+from mock import DEFAULT
+from mock import MagicMock
 from mock import patch
 from mock import sentinel
-from mock import MagicMock
 
 from pytest import fixture
 from pytest import yield_fixture
@@ -143,14 +144,15 @@ class ExampleInitDatabase(InitDatabase, MockedInitDatabase):
     def __init__(self):
         super().__init__('module')
         self._generator = MagicMock()
-
-    def get_metadata(self):
-        super().get_metadata()
-        return sentinel.metadata
+        self._driver = MagicMock()
 
     def get_datagenerator(self):
         super().get_datagenerator()
         return self._generator
+
+    def get_driver(self):
+        super().get_datagenerator()
+        return self._driver
 
 
 class TestInitDatabase(LocalFixtures):
@@ -172,24 +174,6 @@ class TestInitDatabase(LocalFixtures):
             yield mock
 
     @yield_fixture
-    def mScanner(self):
-        patcher = patch('implugin.alembic.commands.Scanner')
-        with patcher as mock:
-            yield mock
-
-    @yield_fixture
-    def mimport_module(self):
-        patcher = patch('implugin.alembic.commands.import_module')
-        with patcher as mock:
-            yield mock
-
-    @yield_fixture
-    def mre(self):
-        patcher = patch('implugin.alembic.commands.re')
-        with patcher as mock:
-            yield mock
-
-    @yield_fixture
     def m_init(self, command):
         patcher = patch.object(command, '_init')
         with patcher as mock:
@@ -202,8 +186,8 @@ class TestInitDatabase(LocalFixtures):
             yield mock
 
     @yield_fixture
-    def m_scan_for_models(self, command):
-        patcher = patch.object(command, '_scan_for_models')
+    def m_collect_metadatas(self, command):
+        patcher = patch.object(command, '_collect_metadatas')
         with patcher as mock:
             yield mock
 
@@ -233,8 +217,7 @@ class TestInitDatabase(LocalFixtures):
 
         assert command._cache == {}
         assert command.engine == engine
-        assert command.metadata == sentinel.metadata
-        assert command.metadata.bind == engine
+        assert command.metadatas == set()
         assert command.log == log
 
     def test_delete_database_when_no_password(self, command, msys):
@@ -248,9 +231,10 @@ class TestInitDatabase(LocalFixtures):
     def test_delete_database(self, command, msys):
         msys.argv = ['--iwanttodeletedb']
         command.log = MagicMock()
-        command.metadata = MagicMock()
+        metadata = MagicMock()
+        command.metadatas = [metadata]
         table = MagicMock()
-        command.metadata.sorted_tables = [table]
+        metadata.sorted_tables = [table]
         command.engine = MagicMock()
 
         command._delete_database()
@@ -262,12 +246,15 @@ class TestInitDatabase(LocalFixtures):
 
     def test_create_schema(self, command):
         command.log = MagicMock()
-        command.metadata = MagicMock()
+        metadata = MagicMock()
+        command.metadatas = [metadata]
+        command.engine = MagicMock()
 
         command._create_schema()
 
         command.log.info.assert_called_once_with('Initializing database...')
-        command.metadata.create_all.assert_called_once_with()
+        metadata.create_all.assert_called_once_with()
+        assert metadata.bind == command.engine
 
     def test_stamp(self, command, mConfig, mstamp):
         command.paths = {'alembic:ini': 'ini'}
@@ -277,19 +264,23 @@ class TestInitDatabase(LocalFixtures):
         mConfig.assert_called_once_with('ini')
         mstamp.assert_called_once_with(mConfig.return_value, 'head')
 
-    def test_scan_for_models(self, command, mScanner, mimport_module, mre):
+    def test_collect_metadatas(self, command):
+        command.config = MagicMock()
+        engine = MagicMock()
+        db = MagicMock()
+        driver = MagicMock()
         command.log = MagicMock()
-
-        command._scan_for_models()
-
-        mScanner.assert_called_once_with()
-        reobj = mre.compile.return_value.search
-        mScanner.return_value.scan.assert_called_once_with(
-            mimport_module.return_value,
-            ignore=[reobj],
+        command.config.registry = {'db_engine': engine, 'db': db}
+        command._driver.return_value._drivers = [driver]
+        command._driver.side_effect = (
+            lambda method: method() == db and DEFAULT
         )
-        mre.compile.assert_called_once_with('tests$')
-        mimport_module.assert_called_once_with('module')
+        command.metadatas = sentinel.metadatas
+
+        command._collect_metadatas()
+
+        command.log.info.assert_called_once_with('Scanning for models...')
+        driver._append_metadata.assert_called_once_with(sentinel.metadatas)
 
     def test_generate_fixtures(self, command):
         command.log = MagicMock()
@@ -313,7 +304,7 @@ class TestInitDatabase(LocalFixtures):
         command,
         m_init,
         m_delete_database,
-        m_scan_for_models,
+        m_collect_metadatas,
         m_create_schema,
         m_generate_fixtures,
         m_stamp,
@@ -323,7 +314,7 @@ class TestInitDatabase(LocalFixtures):
         assert command._runned is True
         m_init.assert_called_once_with()
         m_delete_database.assert_called_once_with()
-        m_scan_for_models.assert_called_once_with()
+        m_collect_metadatas.assert_called_once_with()
         m_create_schema.assert_called_once_with()
         m_generate_fixtures.assert_called_once_with()
         m_stamp.assert_called_once_with()
