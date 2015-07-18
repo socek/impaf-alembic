@@ -92,8 +92,8 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
     def run_command(self, settings={}):
         super().run_command(settings)
         self._init()
-        self._delete_database()
         self._collect_metadatas()
+        self._delete_database()
         self._create_schema()
         self._generate_fixtures()
         self._stamp()
@@ -107,8 +107,9 @@ class InitDatabase(SqlAlchemyApplication, DatabaseConnection):
     def _delete_database(self):
         if '--iwanttodeletedb' in sys.argv:
             self.log.info('Removing old database...')
-            for table in reversed(self.metadata.sorted_tables):
-                self.engine.execute(table.delete())
+            for metadata in self.metadatas:
+                for table in reversed(metadata.sorted_tables):
+                    self.engine.execute(table.delete())
 
     def _collect_metadatas(self):
         self.log.info('Scanning for models...')
