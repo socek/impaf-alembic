@@ -151,7 +151,7 @@ class ExampleInitDatabase(InitDatabase, MockedInitDatabase):
         return self._generator
 
     def get_driver(self):
-        super().get_datagenerator()
+        super().get_driver()
         return self._driver
 
 
